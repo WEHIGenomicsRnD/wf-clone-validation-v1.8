@@ -11,7 +11,7 @@ if (params.assembly_tool == 'canu'){
 }
 
 OPTIONAL_FILE = file("$projectDir/data/OPTIONAL_FILE")
-
+qc_rules = file("$projectDir/qc_rules.txt")
 
 process filterHostReads {
     errorStrategy 'ignore'
@@ -60,6 +60,7 @@ process checkIfEnoughReads {
         tuple val(meta), path("${meta.alias}.fastq.gz"), optional: true, emit: sample
         path("${meta.alias}.fastcat_stats"), emit: stats
         tuple val(meta.alias), env(STATUS), emit: status
+        path("${meta.alias}.length_hist"), emit: hist
     script:
         int min_read_length = params.large_construct ? 200 : meta.approx_size * 0.5
         int max_read_length = meta.approx_size * 1.5
@@ -71,6 +72,7 @@ process checkIfEnoughReads {
     """
     STATUS="Failed due to insufficient reads"
     # Raw fastcat stats - carried forward from filterHost (if run)
+    cp fastcat_stats/length.hist "${meta.alias}.length_hist"
     mv fastcat_stats "${meta.alias}.fastcat_stats"
 
     fastcat -s ${meta.alias} -r ${meta.alias}.interim $extra_args input.fastq.gz \
@@ -82,6 +84,20 @@ process checkIfEnoughReads {
     """
 }
 
+
+process getqc {
+    label "plasmidQC"
+
+    input:
+       tuple path(sample_stat)
+       path "hist_files/*"
+    output:
+       path "sample_QC.txt", emit: qc
+    script:
+       """
+       workflow-glue qc_length --anal_folder ${params.out_dir} --rule_file ${qc_rules} --stats $sample_stat --hist_file hist_files/*
+       """
+}
 
 process medakaPolishAssembly {
     label "medaka"
@@ -612,6 +628,7 @@ workflow pipeline {
         // drop samples with too low coverage
         sample_fastqs = checkIfEnoughReads(samples_filtered)
 
+        sample_hist=sample_fastqs.hist
 
         // Core assembly and reconciliation
         assemblies = assembleCore(sample_fastqs.sample)
@@ -703,6 +720,7 @@ workflow pipeline {
         // Causes java.lang.StackOverflowError in JsonBuilder so keeping only those used in report
         meta = samples.map{ meta, reads, stats -> ["alias": meta.alias, "n_seqs": meta.n_seqs] }.collect()
 
+
         report = report(
             meta,
             downsampled_stats.collect().ifEmpty(OPTIONAL_FILE),
@@ -725,6 +743,10 @@ workflow pipeline {
             insert_qc_tuple.insert_align_stats.collect().ifEmpty(OPTIONAL_FILE)
             )
 
+        hist_files=sample_hist.collect()
+        plasmid_qc=getqc(report.sample_stat,hist_files)
+        qc_res=plasmid_qc.qc
+
     emit:
         report = report | concat // aggregated channel
         annotations = annotation | concat // aggregated channel
@@ -737,6 +759,8 @@ workflow pipeline {
         assembly_stats = assembly_quality // per-sample channel
         mafs = mafs // per-sample channel
         host = host_bams // per-sample channel
+        hist = sample_hist
+        qc = qc_res
         telemetry = workflow_params // run specific
 }
 
@@ -912,6 +936,8 @@ workflow {
     results.report
     | concat(
         results.annotations | flatten ,
+        results.qc ,
+        results.hist | collect,
         results.inserts | collect ,
         results.assemblies | map { meta, fa, fq -> [fa, fq] }| flatten ,
         results.insert_qc | map { meta, bcf, idx, stats -> [bcf, idx, stats] } | flatten , 
