@@ -15,7 +15,7 @@ def main(args):
 
    anal_path=args.anal_folder
    ## Parsing Histogram files to get the highest peak
-   fname=anal_path.strip().split("/")[-2]
+#   fname=anal_path.strip().split("/")[-2]
 
 #   qc_rules="/vast/scratch/users/gupta.i/forked_wf/wf-clone-validation/qc_rules.txt"
    qc_rules=args.rule_file
@@ -23,13 +23,13 @@ def main(args):
 
    outfile=f"sample_QC.txt"
    out=open(outfile,'w')
-   out.write("SampleId\tSize(User derfined)\tSize (Raw fastq)\tSize (After Assmbly)\n")
+   out.write("SampleId\tQC method\tSize(User derfined)\tSize(Raw fastq)\tSize(After Assembly)\tStatus\n")
 
    hist_dict={}
    hist_files=f"{anal_path}/*.length_hist"
    for file in args.hist_file:
       fname=os.path.splitext(os.path.basename(file))[0]
-      df=pd.read_csv(file,header=None,delimiter="\t",skiprows=200)
+      df=pd.read_csv(file,header=None,delimiter="\t",skiprows=50)
       df2=df.loc[df[2].idxmax()][1]
       lower=round(df2 * .9,2)
       upper=round(df2 * 1.2,2)
@@ -53,14 +53,16 @@ def main(args):
    ## Parsing user define length file
 
    user_dict={}
-   user_file=f"{anal_path}/sample_sheet.csv"
+#   user_file=f"{anal_path}/sample_sheet.csv"
+   user_file=args.ssheet
 
    user_df=pd.read_csv(user_file,header=0)
    for r in range(len(user_df)):
        size= user_df['approx_size'][r]
        lower= size - 20
        upper= round(size * 1.2,2)
-       user_dict[user_df['alias'][r]]=[lower,upper,size]
+       qc = user_df['qc_method'][r]
+       user_dict[user_df['alias'][r]]=[lower,upper,size,qc]
 
 #   print(f"user: {user_dict}")
 
@@ -86,7 +88,7 @@ def main(args):
              status=rules_df[3][r]
              if reason not in 'Completed successfully':
                  status=reason
-             res[k]=[k,user_dict[k][2],hist_dict[k][2],af_dict[k][0],status]
+             res[k]=[k,user_dict[k][3],user_dict[k][2],hist_dict[k][2],af_dict[k][0],status]
              break
 #          else:
 #             print(f"No rule for sample {k}")
@@ -107,6 +109,7 @@ def argparser():
     parser.add_argument('-q','--rule_file', help='QC rule file')
     parser.add_argument('-s','--stats', help='Stats file')
     parser.add_argument('-r','--hist_file', help='Histogram file',nargs='+')
+    parser.add_argument('-i','--ssheet', help='Csv sample sheet')
     return parser
 
 

@@ -88,14 +88,17 @@ process checkIfEnoughReads {
 process getqc {
     label "plasmidQC"
 
+    container 'community.wave.seqera.io/library/natsort_pandas_numpy_openpyxl_pruned:d17f0440b85f9b65' 
     input:
        tuple path(sample_stat)
        path "hist_files/*"
+       path(qcrule)
+       path(ssheet)
     output:
        path "sample_QC.txt", emit: qc
     script:
        """
-       workflow-glue qc_length --anal_folder ${params.out_dir} --rule_file ${qc_rules} --stats $sample_stat --hist_file hist_files/*
+       workflow-glue qc_length --anal_folder ${params.out_dir} --rule_file $qcrule --stats $sample_stat --ssheet $ssheet --hist_file hist_files/* 
        """
 }
 
@@ -744,7 +747,8 @@ workflow pipeline {
             )
 
         hist_files=sample_hist.collect()
-        plasmid_qc=getqc(report.sample_stat,hist_files)
+        ssheet=file("${params.out_dir}/sample_sheet.csv")
+        plasmid_qc=getqc(report.sample_stat,hist_files,qc_rules,ssheet)
         qc_res=plasmid_qc.qc
 
     emit:
